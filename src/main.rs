@@ -1,7 +1,8 @@
 use std::io::{self, Read};
 
-mod lexer;
-mod token;
+mod kind;
+mod node;
+mod parser;
 
 fn read_stdin() -> Result<String, io::Error> {
     let mut buf = String::new();
@@ -11,6 +12,6 @@ fn read_stdin() -> Result<String, io::Error> {
 
 fn main() {
     let input = read_stdin().unwrap_or_else(|e| panic!("Unable to read input from stdin: {}", e));
-    let tokens = lexer::tokenize(&input);
+    let tokens = parser::parse(&input);
     dbg!(tokens);
 }
