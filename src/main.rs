@@ -1,5 +1,9 @@
 use std::io::{self, Read};
 
+use crate::format::format_text;
+
+mod doc;
+mod format;
 mod kind;
 mod node;
 mod parser;
@@ -12,6 +16,6 @@ fn read_stdin() -> Result<String, io::Error> {
 
 fn main() {
     let input = read_stdin().unwrap_or_else(|e| panic!("Unable to read input from stdin: {}", e));
-    let tokens = parser::parse(&input);
-    dbg!(tokens);
+    let formatted = format_text(&input).unwrap();
+    print!("{}", formatted);
 }

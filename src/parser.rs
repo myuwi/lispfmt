@@ -68,26 +68,22 @@ fn parser<'src>()
             c == '\n' || c == '\r'
         }
 
-        let whitespace = choice((
-            any()
-                .filter(|c: &char| c.is_whitespace() && !is_newline(*c))
-                .repeated()
-                .then(any().filter(|c: &char| is_newline(*c)))
-                .ignored(),
-            any()
-                .filter(|c: &char| c.is_whitespace() && !is_newline(*c))
-                .repeated()
-                .at_least(1)
-                .ignored(),
-        ))
-        .to_slice()
-        .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Whitespace, s, e.span()));
+        let space = any()
+            .filter(|c: &char| c.is_whitespace() && !is_newline(*c))
+            .repeated()
+            .at_least(1)
+            .to_slice()
+            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Space, s, e.span()));
+
+        let newline = any()
+            .filter(|c: &char| is_newline(*c))
+            .to_slice()
+            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Newline, s, e.span()));
 
         let symbol = just(":")
             .or(just("~="))
             .or(none_of("(){}[]\"`',~;@")
-                .filter(|c: &char| !c.is_control())
-                .and_is(whitespace.not())
+                .filter(|c: &char| !c.is_control() && !c.is_whitespace())
                 .repeated()
                 .at_least(1)
                 .to_slice())
@@ -104,7 +100,7 @@ fn parser<'src>()
             .to_slice()
             .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Comment, s, e.span()));
 
-        let trivia = whitespace.or(comment);
+        let trivia = newline.or(space).or(comment);
         let non_trivia = node.clone().and_is(trivia.not());
 
         let list = group((
@@ -194,7 +190,8 @@ fn parser<'src>()
             .or(string)
             .or(boolean)
             .or(comment)
-            .or(whitespace)
+            .or(space)
+            .or(newline)
             .or(symbol)
     });
 
@@ -203,6 +200,6 @@ fn parser<'src>()
         .map_with(|s, e| SyntaxNode::inner(SyntaxKind::Root, s, e.span()))
 }
 
-pub fn parse(src: &str) -> (Option<SyntaxNode<'_>>, Vec<Rich<'_, char>>) {
-    parser().parse(src).into_output_errors()
+pub fn parse(src: &str) -> Result<SyntaxNode<'_>, Vec<Rich<'_, char>>> {
+    parser().parse(src).into_result()
 }

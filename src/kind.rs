@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SyntaxKind {
     /// The root of a syntax tree
     Root,
@@ -27,9 +27,10 @@ pub enum SyntaxKind {
     /// A boolean: `true`, `false`.
     Boolean,
 
-    /// Whitespace containing at most one newline character.
-    Whitespace,
-
+    /// A Newline
+    Newline,
+    /// Spaces
+    Space,
     /// A comment: `; ...`.
     Comment,
 
@@ -44,4 +45,21 @@ pub enum SyntaxKind {
 
     /// A node prefixed by another node: `#(...)`.
     Prefixed,
+}
+
+impl SyntaxKind {
+    pub fn is_trivia(&self) -> bool {
+        matches!(
+            self,
+            SyntaxKind::Newline | SyntaxKind::Space | SyntaxKind::Comment
+        )
+    }
+
+    pub fn is_space(&self) -> bool {
+        matches!(self, SyntaxKind::Space)
+    }
+
+    pub fn is_comment(&self) -> bool {
+        matches!(self, SyntaxKind::Comment)
+    }
 }

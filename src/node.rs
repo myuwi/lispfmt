@@ -53,6 +53,29 @@ impl<'src> SyntaxNode<'src> {
     }
 }
 
+impl SyntaxNode<'_> {
+    pub fn kind(&self) -> &SyntaxKind {
+        match self {
+            SyntaxNode::Leaf(leaf) => &leaf.kind,
+            SyntaxNode::Inner(inner) => &inner.kind,
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        match self {
+            SyntaxNode::Leaf(leaf) => leaf.text,
+            SyntaxNode::Inner(_) => "",
+        }
+    }
+
+    pub fn children(&self) -> std::slice::Iter<'_, SyntaxNode<'_>> {
+        match self {
+            SyntaxNode::Leaf(_) => [].iter(),
+            SyntaxNode::Inner(inner) => inner.children.iter(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct LeafNode<'src> {
     pub kind: SyntaxKind,
