@@ -1,205 +1,134 @@
-use chumsky::{
-    IterParser, Parser, extra,
-    prelude::{Rich, any, choice, group, just, none_of, one_of, recursive},
-};
+use std::{iter::Peekable, vec::IntoIter};
+
+use chumsky::error::Rich;
 
 use crate::{
     kind::SyntaxKind,
-    node::{Span, SyntaxNode},
+    lexer::lex,
+    node::{SyntaxElement, Token},
 };
 
 // TODO: Error recovery
+pub fn parse(src: &str) -> Result<SyntaxElement<'_>, Vec<Rich<'_, char>>> {
+    let mut p = Parser::new(src);
 
-fn parser<'src>()
--> impl Parser<'src, &'src str, SyntaxNode<'src>, extra::Err<Rich<'src, char, Span>>> {
-    let node = recursive(|node| {
-        let number = {
-            let sign = one_of("+-");
-            let decimal = {
-                let dec_digit = any().filter(move |c: &char| c.is_ascii_digit());
-                let dec_literal = dec_digit.then(dec_digit.or(just('_')).repeated());
+    exprs(&mut p, SyntaxKind::End);
+    p.assert(SyntaxKind::End);
+    let root = SyntaxElement::node(SyntaxKind::Root, p.finish());
 
-                let frac = just(".").then(dec_literal.or_not());
-                let exp = one_of("eE").then(sign.or_not()).then(dec_literal);
-
-                choice((
-                    dec_literal.then(frac.or_not()).ignored(),
-                    just(".").then(dec_literal).ignored(),
-                ))
-                .then(exp.or_not())
-                .to_slice()
-            };
-
-            let hexadecimal = {
-                let hex_prefix = just("0").then(one_of("xX"));
-                let hex_digit = any().filter(move |c: &char| c.is_ascii_hexdigit());
-                let hex_literal = hex_digit.then(hex_digit.or(just('_')).repeated());
-
-                let frac = just(".").then(hex_literal.or_not());
-                let exp = one_of("pP").then(sign.or_not()).then(hex_literal);
-
-                hex_prefix
-                    .then(choice((
-                        hex_literal.then(frac.or_not()).ignored(),
-                        just(".").then(hex_literal).ignored(),
-                    )))
-                    .then(exp.or_not())
-                    .to_slice()
-            };
-
-            sign.or_not()
-                .then(hexadecimal.or(decimal).or(just(".inf")).or(just(".nan")))
-        }
-        .to_slice()
-        .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Number, s, e.span()));
-
-        let quoted_string = none_of("\\\"")
-            .ignored()
-            .or(just('\\').then(any()).ignored())
-            .repeated()
-            .delimited_by(just('"'), just('"'))
-            .to_slice();
-
-        let boolean = just("true")
-            .or(just("false"))
-            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Boolean, s, e.span()));
-
-        fn is_newline(c: char) -> bool {
-            c == '\n' || c == '\r'
-        }
-
-        let space = any()
-            .filter(|c: &char| c.is_whitespace() && !is_newline(*c))
-            .repeated()
-            .at_least(1)
-            .to_slice()
-            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Space, s, e.span()));
-
-        let newline = any()
-            .filter(|c: &char| is_newline(*c))
-            .to_slice()
-            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Newline, s, e.span()));
-
-        let symbol = just(":")
-            .or(just("~="))
-            .or(none_of("(){}[]\"`',~;@")
-                .filter(|c: &char| !c.is_control() && !c.is_whitespace())
-                .repeated()
-                .at_least(1)
-                .to_slice())
-            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Symbol, s, e.span()));
-
-        let colon_string = just(":").then(symbol).to_slice();
-
-        let string = quoted_string
-            .or(colon_string)
-            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::String, s, e.span()));
-
-        let comment = just(";")
-            .then(none_of("\n").repeated())
-            .to_slice()
-            .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Comment, s, e.span()));
-
-        let trivia = newline.or(space).or(comment);
-        let non_trivia = node.clone().and_is(trivia.not());
-
-        let list = group((
-            just("(").map_with(|s, e| SyntaxNode::leaf(SyntaxKind::LParen, s, e.span())),
-            node.clone().repeated().collect::<Vec<SyntaxNode>>(),
-            just(")").map_with(|s, e| SyntaxNode::leaf(SyntaxKind::RParen, s, e.span())),
-        ))
-        .map_with(|s, e| {
-            let mut children = vec![s.0];
-            for elem in s.1 {
-                children.push(elem);
-            }
-            children.push(s.2);
-
-            SyntaxNode::inner(SyntaxKind::List, children, e.span())
-        });
-
-        let sequence = group((
-            just("[").map_with(|s, e| SyntaxNode::leaf(SyntaxKind::LBracket, s, e.span())),
-            node.clone().repeated().collect::<Vec<SyntaxNode>>(),
-            just("]").map_with(|s, e| SyntaxNode::leaf(SyntaxKind::RBracket, s, e.span())),
-        ))
-        .map_with(|s, e| {
-            let mut children = vec![s.0];
-            for elem in s.1 {
-                children.push(elem);
-            }
-            children.push(s.2);
-
-            SyntaxNode::inner(SyntaxKind::Sequence, children, e.span())
-        });
-
-        let table_pair = group((
-            non_trivia.clone(),
-            trivia.repeated().collect::<Vec<SyntaxNode>>(),
-            non_trivia.clone(),
-        ))
-        .map_with(|s, e| {
-            let mut children = vec![s.0];
-            for elem in s.1 {
-                children.push(elem);
-            }
-            children.push(s.2);
-
-            SyntaxNode::inner(SyntaxKind::Pair, children, e.span())
-        });
-
-        let table = group((
-            just("{").map_with(|s, e| SyntaxNode::leaf(SyntaxKind::LBrace, s, e.span())),
-            trivia.repeated().collect::<Vec<SyntaxNode>>(),
-            table_pair
-                .then(trivia.repeated().collect::<Vec<SyntaxNode>>())
-                .repeated()
-                .collect::<Vec<(SyntaxNode, Vec<SyntaxNode>)>>(),
-            just("}").map_with(|s, e| SyntaxNode::leaf(SyntaxKind::RBrace, s, e.span())),
-        ))
-        .map_with(|s, e| {
-            let mut children = vec![s.0];
-            for elem in s.1 {
-                children.push(elem);
-            }
-            for elem in s.2 {
-                children.push(elem.0);
-
-                for trivia in elem.1 {
-                    children.push(trivia);
-                }
-            }
-            children.push(s.3);
-
-            SyntaxNode::inner(SyntaxKind::Table, children, e.span())
-        });
-
-        let prefixed = group((
-            one_of("#'`,")
-                .to_slice()
-                .map_with(|s, e| SyntaxNode::leaf(SyntaxKind::Symbol, s, e.span())),
-            non_trivia.clone(),
-        ))
-        .map_with(|s, e| SyntaxNode::inner(SyntaxKind::Prefixed, vec![s.0, s.1], e.span()));
-
-        // TODO: Error recovery
-        list.or(sequence)
-            .or(table)
-            .or(prefixed)
-            .or(number)
-            .or(string)
-            .or(boolean)
-            .or(comment)
-            .or(space)
-            .or(newline)
-            .or(symbol)
-    });
-
-    node.repeated()
-        .collect()
-        .map_with(|s, e| SyntaxNode::inner(SyntaxKind::Root, s, e.span()))
+    Ok(root)
 }
 
-pub fn parse(src: &str) -> Result<SyntaxNode<'_>, Vec<Rich<'_, char>>> {
-    parser().parse(src).into_result()
+struct Marker(usize);
+
+struct Parser<'src> {
+    lexer: Peekable<IntoIter<Token<'src>>>,
+    nodes: Vec<SyntaxElement<'src>>,
+}
+
+impl<'src> Parser<'src> {
+    fn new(src: &'src str) -> Self {
+        // TODO: remove unwrap
+        let lexer = lex(src).unwrap().into_iter().peekable();
+        Parser {
+            lexer,
+            nodes: vec![],
+        }
+    }
+
+    fn finish(self) -> Vec<SyntaxElement<'src>> {
+        self.nodes
+    }
+
+    fn marker(&self) -> Marker {
+        Marker(self.nodes.len())
+    }
+
+    fn peek(&mut self) -> Option<&Token<'src>> {
+        self.lexer.peek()
+    }
+
+    fn peek_kind(&mut self) -> SyntaxKind {
+        self.peek().map(|t| t.kind).unwrap_or(SyntaxKind::End)
+    }
+
+    fn wrap(&mut self, m: Marker, kind: SyntaxKind) {
+        let to = self.marker().0;
+        let from = m.0.min(to);
+        let children = self.nodes.drain(from..to).collect();
+
+        self.nodes.push(SyntaxElement::node(kind, children));
+    }
+
+    fn at(&mut self, kind: SyntaxKind) -> bool {
+        self.peek().map(|t| t.kind == kind).unwrap_or(false)
+    }
+
+    fn assert(&mut self, kind: SyntaxKind) {
+        assert!(self.at(kind));
+        self.eat();
+    }
+
+    fn eat(&mut self) {
+        // TODO: make this safe
+        let token = self.lexer.next().unwrap();
+        self.nodes.push(SyntaxElement::token(token));
+    }
+}
+
+fn exprs(p: &mut Parser, stop_kind: SyntaxKind) {
+    while !p.at(stop_kind) {
+        expr(p);
+    }
+}
+
+fn expr(p: &mut Parser) {
+    match p.peek_kind() {
+        SyntaxKind::LParen => list(p),
+        SyntaxKind::LBracket => sequence(p),
+        SyntaxKind::LBrace => table(p),
+        SyntaxKind::Prefix => prefixed(p),
+        _ => p.eat(),
+    };
+}
+
+fn list(p: &mut Parser) {
+    let m = p.marker();
+    p.assert(SyntaxKind::LParen);
+    exprs(p, SyntaxKind::RParen);
+    p.assert(SyntaxKind::RParen);
+    p.wrap(m, SyntaxKind::List);
+}
+
+fn sequence(p: &mut Parser) {
+    let m = p.marker();
+    p.assert(SyntaxKind::LBracket);
+    exprs(p, SyntaxKind::RBracket);
+    p.assert(SyntaxKind::RBracket);
+    p.wrap(m, SyntaxKind::Sequence);
+}
+
+fn table(p: &mut Parser) {
+    let m = p.marker();
+
+    p.assert(SyntaxKind::LBrace);
+    while !p.at(SyntaxKind::RBrace) {
+        pair(p)
+    }
+    p.assert(SyntaxKind::RBrace);
+    p.wrap(m, SyntaxKind::Table);
+}
+
+fn pair(p: &mut Parser) {
+    let m = p.marker();
+    expr(p);
+    expr(p);
+    p.wrap(m, SyntaxKind::Pair);
+}
+
+fn prefixed(p: &mut Parser) {
+    let m = p.marker();
+    p.assert(SyntaxKind::Prefix);
+    expr(p);
+    p.wrap(m, SyntaxKind::Prefixed);
 }

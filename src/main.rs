@@ -5,6 +5,7 @@ use crate::format::format_text;
 mod doc;
 mod format;
 mod kind;
+mod lexer;
 mod node;
 mod parser;
 

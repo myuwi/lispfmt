@@ -1,9 +1,6 @@
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SyntaxKind {
-    /// The root of a syntax tree
-    Root,
-
-    // Delimiters
+    // Tokens
     /// An opening parenthesis: `(`.
     LParen,
     /// A closing parenthesis: `)`.
@@ -16,8 +13,6 @@ pub enum SyntaxKind {
     LBracket,
     /// A closing bracket: `]`.
     RBracket,
-
-    // Literals
     /// A symbol: `foo`, `bar`, `baz`.
     Symbol,
     /// A Lua-compatible number: `10`, `3.1415`, `10e-3`, `0xFFFFFF`.
@@ -26,7 +21,11 @@ pub enum SyntaxKind {
     String,
     /// A boolean: `true`, `false`.
     Boolean,
+    Prefix,
+    /// End of input
+    End,
 
+    // Trivia
     /// A Newline
     Newline,
     /// Spaces
@@ -34,6 +33,9 @@ pub enum SyntaxKind {
     /// A comment: `; ...`.
     Comment,
 
+    // Nodes
+    /// The root of a syntax tree
+    Root,
     /// A list: `(print "hello")`.
     List,
     /// A sequence: `[1 2 3]`.
@@ -42,7 +44,6 @@ pub enum SyntaxKind {
     Table,
     /// A key-value pair: `:hello :world`.
     Pair,
-
     /// A node prefixed by another node: `#(...)`.
     Prefixed,
 }
