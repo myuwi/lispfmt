@@ -14,6 +14,7 @@ struct LexState {
     end_consumed: bool,
 }
 
+// TODO: Shebang, #lang directive
 fn lexer<'src>() -> impl Parser<
     'src,
     &'src str,
@@ -105,19 +106,18 @@ fn lexer<'src>() -> impl Parser<
         .to(SyntaxKind::Symbol)
         .labelled("symbol");
 
-    let quoted_string = none_of("\\\"")
+    let string = none_of("\\\"")
         .ignored()
         .or(just('\\').then(any()).ignored())
         .repeated()
-        .delimited_by(just('"'), just('"'));
-
-    let colon_string = just(":").then(symbol_impl).to_slice();
-
-    let string = quoted_string
-        .ignored()
-        .or(colon_string.ignored())
+        .delimited_by(just('"'), just('"'))
         .to(SyntaxKind::String)
         .labelled("string");
+
+    let keyword = just(":")
+        .then(symbol_impl)
+        .to(SyntaxKind::Keyword)
+        .labelled("keyword");
 
     // Trivia
 
@@ -164,20 +164,26 @@ fn lexer<'src>() -> impl Parser<
         .labelled("end of input");
 
     let expression_start = opening_delim
-        .or(string.clone())
+        .or(string)
+        .or(keyword.clone())
         .or(boolean)
         .or(symbol.clone())
         .or(number)
         .labelled("expression");
 
-    let prefix = one_of("#'`,")
-        .then_ignore(expression_start.rewind())
-        .to(SyntaxKind::Prefix)
-        .labelled("prefix");
+    // TODO: A comma can also be a whitespace character in Clojure
+    let prefix = recursive(|prefix| {
+        one_of("#@?~^'`,")
+            .and_is(just("~=").not())
+            .then_ignore(expression_start.or(prefix).rewind())
+            .to(SyntaxKind::Prefix)
+            .labelled("prefix")
+    });
 
     // TODO: Error recovery
     let token = delim
         .or(string)
+        .or(keyword)
         .or(boolean)
         .or(prefix)
         .or(symbol)

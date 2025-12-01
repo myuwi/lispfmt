@@ -3,6 +3,7 @@ use std::io::{self, Read};
 use crate::format::format_text;
 
 mod doc;
+mod doc_ext;
 mod format;
 mod kind;
 mod lexer;

@@ -15,10 +15,12 @@ pub enum SyntaxKind {
     RBracket,
     /// A symbol: `foo`, `bar`, `baz`.
     Symbol,
-    /// A Lua-compatible number: `10`, `3.1415`, `10e-3`, `0xFFFFFF`.
+    /// A number: `10`, `3.1415`, `10e-3`, `0xFFFFFF`.
     Number,
-    /// A string, either quoted: `"foo"` or starting with a colon: `:bar`.
+    /// A quoted string: `"foo"`.
     String,
+    /// A keyword: `:foo`.
+    Keyword,
     /// A boolean: `true`, `false`.
     Boolean,
     Prefix,
@@ -32,6 +34,7 @@ pub enum SyntaxKind {
     Space,
     /// A comment: `; ...`.
     Comment,
+    // TODO: Block comment
 
     // Nodes
     /// The root of a syntax tree
@@ -46,21 +49,4 @@ pub enum SyntaxKind {
     Pair,
     /// A node prefixed by another node: `#(...)`.
     Prefixed,
-}
-
-impl SyntaxKind {
-    pub fn is_trivia(&self) -> bool {
-        matches!(
-            self,
-            SyntaxKind::Newline | SyntaxKind::Space | SyntaxKind::Comment
-        )
-    }
-
-    pub fn is_space(&self) -> bool {
-        matches!(self, SyntaxKind::Space)
-    }
-
-    pub fn is_comment(&self) -> bool {
-        matches!(self, SyntaxKind::Comment)
-    }
 }
