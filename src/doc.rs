@@ -13,8 +13,19 @@ impl<'src> SyntaxElement<'src> {
         match self.kind() {
             SyntaxKind::Root => convert_root(arena, self),
             SyntaxKind::List => convert_container(arena, self, 2, true),
-            // TODO: Heterogeneous sequences
-            SyntaxKind::Sequence => convert_container(arena, self, 1, false).group(),
+            SyntaxKind::Sequence => {
+                let [_open, exprs @ .., _close] = &self.children().collect::<Vec<_>>()[..] else {
+                    panic!("Container is missing an opening or closing delimiter.");
+                };
+
+                let heterogeneous = match exprs.first() {
+                    Some(first) => exprs.iter().any(|e| e.kind() != first.kind()),
+                    None => false,
+                };
+
+                let doc = convert_container(arena, self, 1, heterogeneous);
+                if heterogeneous { doc } else { doc.group() }
+            }
             SyntaxKind::Table => convert_container(arena, self, 1, false).group(),
 
             // FIXME: Handle trivia between pair
@@ -53,12 +64,12 @@ fn convert_root<'src>(arena: &'src Arena<'src>, root: &'src SyntaxElement<'src>)
     arena.concat(root.children().enumerate().map(|(i, expr)| {
         let (leading_trivia, trailing_trivia) = expr.trivia();
 
-        let ignore_initial_newlines = i == 0;
+        let ignore_leading_newlines = i == 0;
 
         let mut doc = convert_leading_trivia(
             arena,
             leading_trivia,
-            !ignore_initial_newlines,
+            !ignore_leading_newlines,
             *expr.kind() != SyntaxKind::End,
         );
 
