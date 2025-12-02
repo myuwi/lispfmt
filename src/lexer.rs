@@ -5,6 +5,7 @@ use chumsky::{
 };
 
 use crate::{
+    error::Error,
     kind::SyntaxKind,
     node::{Span, Token, TriviaPiece},
 };
@@ -213,6 +214,6 @@ fn lexer<'src>() -> impl Parser<
         })
 }
 
-pub fn lex(src: &str) -> Result<Vec<Token<'_>>, Vec<Rich<'_, char>>> {
-    lexer().parse(src).into_result()
+pub fn lex<'src>(src: &'src str) -> Result<Vec<Token<'src>>, Error<'src>> {
+    lexer().parse(src).into_result().map_err(Error::Lex)
 }

@@ -1,9 +1,13 @@
-use std::io::{self, Read};
+use std::{
+    io::{self, Read},
+    process::exit,
+};
 
 use crate::format::format_text;
 
 mod doc;
 mod doc_ext;
+mod error;
 mod format;
 mod kind;
 mod lexer;
@@ -18,6 +22,12 @@ fn read_stdin() -> Result<String, io::Error> {
 
 fn main() {
     let input = read_stdin().unwrap_or_else(|e| panic!("Unable to read input from stdin: {}", e));
-    let formatted = format_text(&input).unwrap();
-    print!("{}", formatted);
+
+    match format_text(&input) {
+        Ok(formatted) => print!("{}", formatted),
+        Err(error) => {
+            error.print(&input);
+            exit(1);
+        }
+    }
 }

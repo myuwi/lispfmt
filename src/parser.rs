@@ -1,16 +1,15 @@
 use std::{iter::Peekable, vec::IntoIter};
 
-use chumsky::error::Rich;
-
 use crate::{
+    error::Error,
     kind::SyntaxKind,
     lexer::lex,
     node::{SyntaxElement, Token},
 };
 
 // TODO: Error recovery
-pub fn parse(src: &str) -> Result<SyntaxElement<'_>, Vec<Rich<'_, char>>> {
-    let mut p = Parser::new(src);
+pub fn parse<'src>(src: &'src str) -> Result<SyntaxElement<'src>, Error<'src>> {
+    let mut p = Parser::new(src)?;
 
     exprs(&mut p, SyntaxKind::End);
     p.assert(SyntaxKind::End);
@@ -27,13 +26,12 @@ struct Parser<'src> {
 }
 
 impl<'src> Parser<'src> {
-    fn new(src: &'src str) -> Self {
-        // TODO: remove unwrap
-        let lexer = lex(src).unwrap().into_iter().peekable();
-        Parser {
+    fn new(src: &'src str) -> Result<Self, Error<'src>> {
+        let lexer = lex(src)?.into_iter().peekable();
+        Ok(Parser {
             lexer,
             nodes: vec![],
-        }
+        })
     }
 
     fn finish(self) -> Vec<SyntaxElement<'src>> {

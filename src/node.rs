@@ -138,6 +138,7 @@ impl SyntaxElement<'_> {
 #[derive(Clone, Debug)]
 pub struct TriviaPiece<'src> {
     pub kind: SyntaxKind,
+    #[allow(dead_code)]
     pub span: Span,
     pub text: &'src str,
 }

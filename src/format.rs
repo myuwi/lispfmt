@@ -1,9 +1,9 @@
 use pretty::Arena;
 
-use crate::parser::parse;
+use crate::{error::Error, parser::parse};
 
-pub fn format_text(src: &str) -> Result<String, ()> {
-    let tree = parse(src).unwrap();
+pub fn format_text<'src>(src: &'src str) -> Result<String, Error<'src>> {
+    let tree = parse(src)?;
     let arena = Arena::<()>::new();
 
     let formatted = tree.to_doc(&arena).pretty(100).to_string();
