@@ -53,3 +53,33 @@ pub enum SyntaxKind {
     /// An expression preceded by a prefix: `#(...)`.
     Prefixed,
 }
+
+impl SyntaxKind {
+    pub fn name(&self) -> &'static str {
+        match self {
+            SyntaxKind::LParen => "opening parenthesis",
+            SyntaxKind::RParen => "closing parenthesis",
+            SyntaxKind::LBrace => "opening brace",
+            SyntaxKind::RBrace => "closing brace",
+            SyntaxKind::LBracket => "opening bracket",
+            SyntaxKind::RBracket => "closing bracket",
+            SyntaxKind::Symbol => "symbol",
+            SyntaxKind::Number => "number",
+            SyntaxKind::String => "string",
+            SyntaxKind::Keyword => "keyword",
+            SyntaxKind::Boolean => "boolean",
+            SyntaxKind::Prefix => "prefix",
+            SyntaxKind::HashDirective => "hash directive",
+            SyntaxKind::End => "end of input",
+            SyntaxKind::Newline => "newline",
+            SyntaxKind::Space => "space",
+            SyntaxKind::Comment => "comment",
+            SyntaxKind::Root => "root",
+            SyntaxKind::List => "list",
+            SyntaxKind::Sequence => "sequence",
+            SyntaxKind::Table => "table",
+            SyntaxKind::Pair => "key-value pair",
+            SyntaxKind::Prefixed => "prefixed expression",
+        }
+    }
+}

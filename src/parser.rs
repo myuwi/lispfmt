@@ -4,16 +4,16 @@ use crate::{
     error::Error,
     kind::SyntaxKind,
     lexer::lex,
-    node::{SyntaxElement, Token},
+    node::{Span, SyntaxElement, Token},
 };
 
 // TODO: Error recovery
 pub fn parse<'src>(src: &'src str) -> Result<SyntaxElement<'src>, Error<'src>> {
     let mut p = Parser::new(src)?;
 
-    exprs(&mut p, SyntaxKind::End);
-    p.assert(SyntaxKind::End);
-    let root = SyntaxElement::node(SyntaxKind::Root, p.finish());
+    exprs(&mut p, &[SyntaxKind::End]);
+    p.expect(SyntaxKind::End);
+    let root = SyntaxElement::node(SyntaxKind::Root, p.finish()?);
 
     Ok(root)
 }
@@ -23,6 +23,7 @@ struct Marker(usize);
 struct Parser<'src> {
     lexer: Peekable<IntoIter<Token<'src>>>,
     nodes: Vec<SyntaxElement<'src>>,
+    errors: Vec<(String, Span)>,
 }
 
 impl<'src> Parser<'src> {
@@ -31,11 +32,16 @@ impl<'src> Parser<'src> {
         Ok(Parser {
             lexer,
             nodes: vec![],
+            errors: vec![],
         })
     }
 
-    fn finish(self) -> Vec<SyntaxElement<'src>> {
-        self.nodes
+    fn finish(self) -> Result<Vec<SyntaxElement<'src>>, Error<'src>> {
+        if self.errors.is_empty() {
+            Ok(self.nodes)
+        } else {
+            Err(Error::Parse(self.errors))
+        }
     }
 
     fn marker(&self) -> Marker {
@@ -59,23 +65,53 @@ impl<'src> Parser<'src> {
     }
 
     fn at(&mut self, kind: SyntaxKind) -> bool {
-        self.peek().map(|t| t.kind == kind).unwrap_or(false)
+        self.peek_kind() == kind
+    }
+
+    fn at_one_of(&mut self, kinds: &[SyntaxKind]) -> bool {
+        kinds.contains(&self.peek_kind())
     }
 
     fn assert(&mut self, kind: SyntaxKind) {
-        assert!(self.at(kind));
+        assert_eq!(kind, self.peek_kind());
         self.eat();
     }
 
     fn eat(&mut self) {
-        // TODO: make this safe
-        let token = self.lexer.next().unwrap();
-        self.nodes.push(SyntaxElement::token(token));
+        if let Some(token) = self.lexer.next() {
+            self.nodes.push(SyntaxElement::token(token));
+        }
+    }
+
+    fn eat_if(&mut self, kind: SyntaxKind) -> bool {
+        let is_kind = self.at(kind);
+        if is_kind {
+            self.eat();
+        }
+        is_kind
+    }
+
+    fn expect(&mut self, kind: SyntaxKind) {
+        if !self.eat_if(kind) {
+            let m = self.marker();
+            let pos = self.nodes.get(m.0 - 1).map(|n| n.span().end).unwrap_or(0);
+            self.errors
+                .push((format!("expected {}", kind.name()), (pos..pos).into()))
+        }
+    }
+
+    fn unexpected(&mut self) {
+        let m = self.marker();
+        // TODO: Produce a SyntaxElement::Error?
+        self.eat();
+        let node = &self.nodes[m.0];
+        self.errors
+            .push((format!("unexpected {}", node.kind().name()), node.span()))
     }
 }
 
-fn exprs(p: &mut Parser, stop_kind: SyntaxKind) {
-    while !p.at(stop_kind) {
+fn exprs(p: &mut Parser, stop_kinds: &[SyntaxKind]) {
+    while !p.at_one_of(stop_kinds) {
         expr(p);
     }
 }
@@ -86,34 +122,43 @@ fn expr(p: &mut Parser) {
         SyntaxKind::LBracket => sequence(p),
         SyntaxKind::LBrace => table(p),
         SyntaxKind::Prefix => prefixed(p),
-        _ => p.eat(),
+
+        SyntaxKind::Symbol
+        | SyntaxKind::Number
+        | SyntaxKind::String
+        | SyntaxKind::Keyword
+        | SyntaxKind::Boolean
+        | SyntaxKind::HashDirective => p.eat(),
+
+        _ => p.unexpected(),
     };
 }
 
 fn list(p: &mut Parser) {
     let m = p.marker();
     p.assert(SyntaxKind::LParen);
-    exprs(p, SyntaxKind::RParen);
-    p.assert(SyntaxKind::RParen);
+    exprs(p, &[SyntaxKind::RParen, SyntaxKind::End]);
+    p.expect(SyntaxKind::RParen);
     p.wrap(m, SyntaxKind::List);
 }
 
 fn sequence(p: &mut Parser) {
     let m = p.marker();
     p.assert(SyntaxKind::LBracket);
-    exprs(p, SyntaxKind::RBracket);
-    p.assert(SyntaxKind::RBracket);
+    exprs(p, &[SyntaxKind::RBracket, SyntaxKind::End]);
+    p.expect(SyntaxKind::RBracket);
     p.wrap(m, SyntaxKind::Sequence);
 }
 
 fn table(p: &mut Parser) {
     let m = p.marker();
-
     p.assert(SyntaxKind::LBrace);
-    while !p.at(SyntaxKind::RBrace) {
+
+    // TODO: Improve error message when table contains an odd number of exprs and/or unexpected tokens
+    while !p.at_one_of(&[SyntaxKind::RBrace, SyntaxKind::End]) {
         pair(p)
     }
-    p.assert(SyntaxKind::RBrace);
+    p.expect(SyntaxKind::RBrace);
     p.wrap(m, SyntaxKind::Table);
 }
 
