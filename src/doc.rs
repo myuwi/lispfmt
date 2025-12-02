@@ -53,6 +53,8 @@ impl<'src> SyntaxElement<'src> {
             | SyntaxKind::Prefix
             | SyntaxKind::End => arena.text(self.text()),
 
+            SyntaxKind::HashDirective => arena.text(self.text().trim_end()),
+
             SyntaxKind::Newline | SyntaxKind::Space | SyntaxKind::Comment => {
                 unreachable!("Trivia should not appear as a SyntaxElement.")
             }

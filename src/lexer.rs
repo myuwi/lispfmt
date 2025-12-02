@@ -14,7 +14,6 @@ struct LexState {
     end_consumed: bool,
 }
 
-// TODO: Shebang, #lang directive
 fn lexer<'src>() -> impl Parser<
     'src,
     &'src str,
@@ -180,6 +179,12 @@ fn lexer<'src>() -> impl Parser<
             .labelled("prefix")
     });
 
+    let hash_directive = just("#")
+        .then(none_of("\n").repeated())
+        .to(SyntaxKind::HashDirective)
+        .labelled("hash directive")
+        .map_with(|kind, e| (kind, e.slice(), e.span()));
+
     // TODO: Error recovery
     let token = delim
         .or(string)
@@ -191,12 +196,21 @@ fn lexer<'src>() -> impl Parser<
         .or(end_once)
         .map_with(|kind, e| (kind, e.slice(), e.span()));
 
-    group((leading_trivia, token, trailing_trivia))
-        .map(|(leading, (kind, slice, span), trailing)| {
-            Token::new(kind, slice, span, leading, trailing)
+    let with_trivia = |parser| {
+        group((leading_trivia, parser, trailing_trivia))
+            .map(|(leading, (kind, slice, span), trailing)| {
+                Token::new(kind, slice, span, leading, trailing)
+            })
+            .repeated()
+            .collect::<Vec<_>>()
+    };
+
+    with_trivia(hash_directive.boxed())
+        .then(with_trivia(token.boxed()))
+        .map(|(mut directives, mut tokens)| {
+            directives.append(&mut tokens);
+            directives
         })
-        .repeated()
-        .collect()
 }
 
 pub fn lex(src: &str) -> Result<Vec<Token<'_>>, Vec<Rich<'_, char>>> {

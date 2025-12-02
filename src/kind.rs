@@ -23,7 +23,10 @@ pub enum SyntaxKind {
     Keyword,
     /// A boolean: `true`, `false`.
     Boolean,
+    /// A prefix: `'`, `#`.
     Prefix,
+    /// A hash directive: `#!/usr/bin/env fennel`, `#lang racket`.
+    HashDirective,
     /// End of input
     End,
 
@@ -47,6 +50,6 @@ pub enum SyntaxKind {
     Table,
     /// A key-value pair: `:hello :world`.
     Pair,
-    /// A node prefixed by another node: `#(...)`.
+    /// An expression preceded by a prefix: `#(...)`.
     Prefixed,
 }
