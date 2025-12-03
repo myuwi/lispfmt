@@ -175,6 +175,11 @@ fn convert_container<'src>(
 
     doc = doc.append(close.to_doc(arena)).hang(indent);
 
+    // Make sure line breaks are kept even when container inside a grouped container
+    if keep_original_linebreaks {
+        doc = doc.append(arena.break_group());
+    }
+
     doc
 }
 
