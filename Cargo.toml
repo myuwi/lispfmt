@@ -1,6 +1,9 @@
 [package]
 name = "lispfmt"
+description = "A universal formatter for the Lisp family of programming languages."
 version = "0.1.0"
+authors = ["Miika Kurvinen <myuwi@proton.me>"]
+license = "ISC"
 edition = "2024"
 
 [dependencies]
