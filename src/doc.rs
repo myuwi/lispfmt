@@ -86,6 +86,16 @@ where
     result
 }
 
+fn check_has_ignore_comment<'a, I>(trivia: &mut I) -> bool
+where
+    I: Iterator<Item = &'a SyntaxElement<'a>>,
+{
+    trivia.any(|t| {
+        t.kind() == &SyntaxKind::Comment
+            && t.text().trim_start_matches(";").trim() == "lispfmt-ignore"
+    })
+}
+
 fn convert_root<'src>(arena: &'src Arena<'src>, root: &'src SyntaxElement<'src>) -> ArenaDoc<'src> {
     let mut iter = root.children().peekable();
     let mut doc = arena.nil();
@@ -99,15 +109,23 @@ fn convert_root<'src>(arena: &'src Arena<'src>, root: &'src SyntaxElement<'src>)
 
         let trailing_trivia = collect_while(&mut iter, |e| is_trailing_trivia(e.kind()));
 
+        let ignored = check_has_ignore_comment(
+            &mut leading_trivia.iter().chain(trailing_trivia.iter()).cloned(),
+        );
+
         doc = doc.append(convert_leading_trivia(
             arena,
-            leading_trivia,
+            &leading_trivia,
             !ignore_leading_newlines,
             expr.is_some(),
         ));
 
         if let Some(expr) = expr {
-            doc = doc.append(expr.to_doc(arena));
+            if ignored {
+                doc = doc.append(expr.content());
+            } else {
+                doc = doc.append(expr.to_doc(arena));
+            }
         }
 
         for trivia in trailing_trivia {
@@ -177,11 +195,21 @@ fn convert_list_like<'src>(
 
         expr_doc = expr_doc.append(convert_leading_trivia(
             arena,
-            leading_trivia,
+            &leading_trivia,
             !first_expr,
             true,
         ));
-        expr_doc = expr_doc.append(expr.to_doc(arena));
+
+        let ignored = check_has_ignore_comment(
+            &mut leading_trivia.iter().chain(trailing_trivia.iter()).cloned(),
+        );
+
+        // TODO: Break group when ignored is multiline
+        if ignored {
+            expr_doc = expr_doc.append(expr.content());
+        } else {
+            expr_doc = expr_doc.append(expr.to_doc(arena));
+        }
 
         last_expr_has_trailing_comment = false;
         for trivia in trailing_trivia {
@@ -210,7 +238,7 @@ fn convert_list_like<'src>(
 
     doc = doc.append(convert_leading_trivia(
         arena,
-        leading_trivia,
+        &leading_trivia,
         !exprs.iter().all(|e| e.kind().is_trivia()),
         false,
     ));
@@ -227,7 +255,7 @@ fn convert_list_like<'src>(
 
 fn convert_leading_trivia<'src>(
     arena: &'src Arena<'src>,
-    leading_trivia: Vec<&'src SyntaxElement<'src>>,
+    leading_trivia: &Vec<&'src SyntaxElement<'src>>,
     allow_leading_newline: bool,
     allow_trailing_newline: bool,
 ) -> ArenaDoc<'src> {

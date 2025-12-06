@@ -78,6 +78,13 @@ impl SyntaxElement<'_> {
         }
     }
 
+    pub fn content(&self) -> String {
+        match self {
+            SyntaxElement::Token(token) => token.text.to_string(),
+            SyntaxElement::Node(node) => node.children.iter().map(|c| c.content()).collect(),
+        }
+    }
+
     pub fn children(&self) -> std::slice::Iter<'_, SyntaxElement<'_>> {
         match self {
             SyntaxElement::Token(_) => [].iter(),
