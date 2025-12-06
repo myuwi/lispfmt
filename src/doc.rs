@@ -1,8 +1,6 @@
-use std::iter::Peekable;
-
 use pretty::{Arena, Doc, DocAllocator, DocBuilder};
 
-use crate::{doc_ext::DocExt, kind::SyntaxKind, node::SyntaxElement};
+use crate::{doc_ext::DocExt, kind::SyntaxKind, node::SyntaxElement, peekable_ext::PeekableExt};
 
 pub type ArenaDoc<'a> = DocBuilder<'a, Arena<'a>>;
 
@@ -74,18 +72,6 @@ fn is_trailing_trivia(kind: &SyntaxKind) -> bool {
     matches!(kind, SyntaxKind::Space | SyntaxKind::Comment)
 }
 
-fn collect_while<T, I, F>(iter: &mut Peekable<I>, f: F) -> Vec<T>
-where
-    F: Fn(&T) -> bool,
-    I: Iterator<Item = T>,
-{
-    let mut result = vec![];
-    while let Some(t) = iter.next_if(&f) {
-        result.push(t);
-    }
-    result
-}
-
 fn check_has_ignore_comment<'a, I>(trivia: &mut I) -> bool
 where
     I: Iterator<Item = &'a SyntaxElement<'a>>,
@@ -103,11 +89,9 @@ fn convert_root<'src>(arena: &'src Arena<'src>, root: &'src SyntaxElement<'src>)
     while iter.peek().is_some() {
         let ignore_leading_newlines = matches!(*doc, Doc::Nil);
 
-        let leading_trivia = collect_while(&mut iter, |e| is_leading_trivia(e.kind()));
-
+        let leading_trivia = iter.collect_while(|e| is_leading_trivia(e.kind()));
         let expr = iter.next();
-
-        let trailing_trivia = collect_while(&mut iter, |e| is_trailing_trivia(e.kind()));
+        let trailing_trivia = iter.collect_while(|e| is_trailing_trivia(e.kind()));
 
         let ignored = check_has_ignore_comment(
             &mut leading_trivia.iter().chain(trailing_trivia.iter()).cloned(),
@@ -155,7 +139,7 @@ fn convert_list_like<'src>(
     let mut iter = exprs.iter().cloned().peekable();
     let mut doc = open.to_doc(arena);
 
-    let trailing_trivia = collect_while(&mut iter, |e| is_trailing_trivia(e.kind()));
+    let trailing_trivia = iter.collect_while(|e| is_trailing_trivia(e.kind()));
     for trivia in trailing_trivia {
         if *trivia.kind() == SyntaxKind::Comment {
             doc = doc
@@ -170,19 +154,23 @@ fn convert_list_like<'src>(
     let mut last_expr_has_trailing_comment = false;
 
     let leading_trivia = loop {
-        let leading_trivia = collect_while(&mut iter, |e| is_leading_trivia(e.kind()));
+        let leading_trivia = iter.collect_while(|e| is_leading_trivia(e.kind()));
 
+        // If there is no expr, this trivia belongs to the closing delimiter
         let Some(expr) = iter.next() else {
             break leading_trivia;
         };
 
-        let trailing_trivia = collect_while(&mut iter, |e| is_trailing_trivia(e.kind()));
+        let trailing_trivia = iter.collect_while(|e| is_trailing_trivia(e.kind()));
 
-        let add_linebreak = !keep_original_linebreaks
-            || leading_trivia
+        let add_linebreak = if keep_original_linebreaks {
+            leading_trivia
                 .first()
                 .map(|t| *t.kind() == SyntaxKind::Newline)
-                .unwrap_or(false);
+                .unwrap_or(false)
+        } else {
+            true
+        };
 
         // Handle expr spacing
         let mut expr_doc = if first_expr {

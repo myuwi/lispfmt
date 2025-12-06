@@ -13,6 +13,7 @@ mod kind;
 mod lexer;
 mod node;
 mod parser;
+mod peekable_ext;
 
 fn read_stdin() -> Result<String, io::Error> {
     let mut buf = String::new();
