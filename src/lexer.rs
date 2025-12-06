@@ -1,26 +1,16 @@
 use chumsky::{
-    IterParser, Parser,
-    extra::{self, SimpleState},
-    prelude::{Rich, any, choice, end, group, just, none_of, one_of, recursive},
+    IterParser, Parser, extra,
+    prelude::{Rich, any, choice, group, just, none_of, one_of, recursive},
 };
 
 use crate::{
     error::Error,
     kind::SyntaxKind,
-    node::{Span, Token, TriviaPiece},
+    node::{Span, Token},
 };
 
-#[derive(Clone, Default)]
-struct LexState {
-    end_consumed: bool,
-}
-
-fn lexer<'src>() -> impl Parser<
-    'src,
-    &'src str,
-    Vec<Token<'src>>,
-    extra::Full<Rich<'src, char, Span>, extra::SimpleState<LexState>, ()>,
-> {
+fn lexer<'src>()
+-> impl Parser<'src, &'src str, Vec<Token<'src>>, extra::Err<Rich<'src, char, Span>>> {
     let number = {
         let sign = one_of("+-");
         let decimal = {
@@ -138,30 +128,7 @@ fn lexer<'src>() -> impl Parser<
         .to(SyntaxKind::Comment)
         .labelled("comment");
 
-    let leading_trivia = space
-        .or(newline)
-        .or(comment)
-        .map_with(|kind, e| TriviaPiece::new(kind, e.slice(), e.span()))
-        .repeated()
-        .collect();
-
-    let trailing_trivia = space
-        .or(comment)
-        .map_with(|kind, e| TriviaPiece::new(kind, e.slice(), e.span()))
-        .repeated()
-        .collect();
-
-    let end_once = end()
-        .try_map_with(|_, e| {
-            let state: &mut SimpleState<LexState> = e.state();
-            if state.end_consumed {
-                return Err(Rich::custom(e.span(), "End of input already consumed"));
-            }
-            state.end_consumed = true;
-
-            Ok(SyntaxKind::End)
-        })
-        .labelled("end of input");
+    let trivia = space.or(newline).or(comment);
 
     let expression_start = opening_delim
         .or(string)
@@ -183,8 +150,7 @@ fn lexer<'src>() -> impl Parser<
     let hash_directive = just("#")
         .then(none_of("\n").repeated())
         .to(SyntaxKind::HashDirective)
-        .labelled("hash directive")
-        .map_with(|kind, e| (kind, e.slice(), e.span()));
+        .labelled("hash directive");
 
     // TODO: Error recovery
     let token = delim
@@ -193,25 +159,24 @@ fn lexer<'src>() -> impl Parser<
         .or(boolean)
         .or(prefix)
         .or(symbol)
-        .or(number)
-        .or(end_once)
-        .map_with(|kind, e| (kind, e.slice(), e.span()));
+        .or(number);
 
-    let with_trivia = |parser| {
-        group((leading_trivia, parser, trailing_trivia))
-            .map(|(leading, (kind, slice, span), trailing)| {
-                Token::new(kind, slice, span, leading, trailing)
-            })
+    group((
+        trivia
+            .or(hash_directive)
+            .map_with(|kind, e| Token::new(kind, e.slice(), e.span()))
             .repeated()
-            .collect::<Vec<_>>()
-    };
-
-    with_trivia(hash_directive.boxed())
-        .then(with_trivia(token.boxed()))
-        .map(|(mut directives, mut tokens)| {
-            directives.append(&mut tokens);
-            directives
-        })
+            .collect::<Vec<_>>(),
+        trivia
+            .or(token)
+            .map_with(|kind, e| Token::new(kind, e.slice(), e.span()))
+            .repeated()
+            .collect::<Vec<_>>(),
+    ))
+    .map(|(mut directives, mut tokens)| {
+        directives.append(&mut tokens);
+        directives
+    })
 }
 
 pub fn lex<'src>(src: &'src str) -> Result<Vec<Token<'src>>, Error<'src>> {

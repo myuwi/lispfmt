@@ -12,7 +12,6 @@ pub fn parse<'src>(src: &'src str) -> Result<SyntaxElement<'src>, Error<'src>> {
     let mut p = Parser::new(src)?;
 
     exprs(&mut p, &[SyntaxKind::End]);
-    p.expect(SyntaxKind::End);
     let root = SyntaxElement::node(SyntaxKind::Root, p.finish()?);
 
     Ok(root)
@@ -22,6 +21,7 @@ struct Marker(usize);
 
 struct Parser<'src> {
     lexer: Peekable<IntoIter<Token<'src>>>,
+    n_trivia: usize,
     nodes: Vec<SyntaxElement<'src>>,
     errors: Vec<(String, Span)>,
 }
@@ -29,11 +29,16 @@ struct Parser<'src> {
 impl<'src> Parser<'src> {
     fn new(src: &'src str) -> Result<Self, Error<'src>> {
         let lexer = lex(src)?.into_iter().peekable();
-        Ok(Parser {
+
+        let mut p = Parser {
             lexer,
+            n_trivia: 0,
             nodes: vec![],
             errors: vec![],
-        })
+        };
+        p.consume_trivia();
+
+        Ok(p)
     }
 
     fn finish(self) -> Result<Vec<SyntaxElement<'src>>, Error<'src>> {
@@ -48,6 +53,10 @@ impl<'src> Parser<'src> {
         Marker(self.nodes.len())
     }
 
+    fn before_trivia(&self) -> Marker {
+        Marker(self.nodes.len() - self.n_trivia)
+    }
+
     fn peek(&mut self) -> Option<&Token<'src>> {
         self.lexer.peek()
     }
@@ -57,11 +66,11 @@ impl<'src> Parser<'src> {
     }
 
     fn wrap(&mut self, m: Marker, kind: SyntaxKind) {
-        let to = self.marker().0;
+        let to = self.before_trivia().0;
         let from = m.0.min(to);
         let children = self.nodes.drain(from..to).collect();
 
-        self.nodes.push(SyntaxElement::node(kind, children));
+        self.nodes.insert(from, SyntaxElement::node(kind, children));
     }
 
     fn at(&mut self, kind: SyntaxKind) -> bool {
@@ -77,10 +86,19 @@ impl<'src> Parser<'src> {
         self.eat();
     }
 
+    fn consume_trivia(&mut self) {
+        while let Some(trivia) = self.lexer.next_if(|t| t.kind.is_trivia()) {
+            self.nodes.push(SyntaxElement::token(trivia));
+            self.n_trivia += 1;
+        }
+    }
+
     fn eat(&mut self) {
         if let Some(token) = self.lexer.next() {
             self.nodes.push(SyntaxElement::token(token));
         }
+        self.n_trivia = 0;
+        self.consume_trivia();
     }
 
     fn eat_if(&mut self, kind: SyntaxKind) -> bool {

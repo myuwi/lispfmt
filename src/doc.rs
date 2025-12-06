@@ -1,10 +1,8 @@
-use pretty::{Arena, DocAllocator, DocBuilder};
+use std::iter::Peekable;
 
-use crate::{
-    doc_ext::DocExt,
-    kind::SyntaxKind,
-    node::{SyntaxElement, TriviaPiece},
-};
+use pretty::{Arena, Doc, DocAllocator, DocBuilder};
+
+use crate::{doc_ext::DocExt, kind::SyntaxKind, node::SyntaxElement};
 
 pub type ArenaDoc<'a> = DocBuilder<'a, Arena<'a>>;
 
@@ -12,25 +10,28 @@ impl<'src> SyntaxElement<'src> {
     pub fn to_doc(&'src self, arena: &'src Arena<'src>) -> ArenaDoc<'src> {
         match self.kind() {
             SyntaxKind::Root => convert_root(arena, self),
-            SyntaxKind::List => convert_container(arena, self, 2, true),
+            SyntaxKind::List => convert_list_like(arena, self, 2, true),
             SyntaxKind::Sequence => {
                 let [_open, exprs @ .., _close] = &self.children().collect::<Vec<_>>()[..] else {
                     panic!("Container is missing an opening or closing delimiter.");
                 };
 
-                let heterogeneous = match exprs.first() {
-                    Some(first) => exprs.iter().any(|e| e.kind() != first.kind()),
+                let mut non_trivia = exprs.iter().filter(|e| !e.kind().is_trivia());
+                let heterogeneous = match non_trivia.next() {
+                    Some(first) => !non_trivia.all(|e| e.kind() == first.kind()),
                     None => false,
                 };
 
-                let doc = convert_container(arena, self, 1, heterogeneous);
+                let doc = convert_list_like(arena, self, 1, heterogeneous);
                 if heterogeneous { doc } else { doc.group() }
             }
-            SyntaxKind::Table => convert_container(arena, self, 1, false).group(),
+            SyntaxKind::Table => convert_list_like(arena, self, 1, false).group(),
 
             // FIXME: Handle trivia between pair
             SyntaxKind::Pair => arena.intersperse(
-                self.children().map(|expr| expr.to_doc(arena)),
+                self.children()
+                    .filter(|e| !e.kind().is_trivia())
+                    .map(|expr| expr.to_doc(arena)),
                 arena.space(),
             ),
 
@@ -56,42 +57,74 @@ impl<'src> SyntaxElement<'src> {
             SyntaxKind::HashDirective => arena.text(self.text().trim_end()),
 
             SyntaxKind::Newline | SyntaxKind::Space | SyntaxKind::Comment => {
-                unreachable!("Trivia should not appear as a SyntaxElement.")
+                unreachable!("Trivia should not be handled through `to_doc`.")
             }
         }
     }
 }
 
+fn is_leading_trivia(kind: &SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Space | SyntaxKind::Newline | SyntaxKind::Comment
+    )
+}
+
+fn is_trailing_trivia(kind: &SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::Space | SyntaxKind::Comment)
+}
+
+fn collect_while<T, I, F>(iter: &mut Peekable<I>, f: F) -> Vec<T>
+where
+    F: Fn(&T) -> bool,
+    I: Iterator<Item = T>,
+{
+    let mut result = vec![];
+    while let Some(t) = iter.next_if(&f) {
+        result.push(t);
+    }
+    result
+}
+
 fn convert_root<'src>(arena: &'src Arena<'src>, root: &'src SyntaxElement<'src>) -> ArenaDoc<'src> {
-    arena.concat(root.children().enumerate().map(|(i, expr)| {
-        let (leading_trivia, trailing_trivia) = expr.trivia();
+    let mut iter = root.children().peekable();
+    let mut doc = arena.nil();
 
-        let ignore_leading_newlines = i == 0;
+    while iter.peek().is_some() {
+        let ignore_leading_newlines = matches!(*doc, Doc::Nil);
 
-        let mut doc = convert_leading_trivia(
+        let leading_trivia = collect_while(&mut iter, |e| is_leading_trivia(e.kind()));
+
+        let expr = iter.next();
+
+        let trailing_trivia = collect_while(&mut iter, |e| is_trailing_trivia(e.kind()));
+
+        doc = doc.append(convert_leading_trivia(
             arena,
             leading_trivia,
             !ignore_leading_newlines,
-            *expr.kind() != SyntaxKind::End,
-        );
+            expr.is_some(),
+        ));
 
-        doc = doc.append(expr.to_doc(arena));
+        if let Some(expr) = expr {
+            doc = doc.append(expr.to_doc(arena));
+        }
 
         for trivia in trailing_trivia {
-            if trivia.kind == SyntaxKind::Comment {
-                doc = doc.append(arena.space()).append(trivia.text.trim_end());
+            if *trivia.kind() == SyntaxKind::Comment {
+                doc = doc.append(arena.space()).append(trivia.text().trim_end());
             }
         }
 
-        if *expr.kind() != SyntaxKind::End {
+        if iter.peek().is_some() {
             doc = doc.append(arena.hardline());
         }
+    }
 
-        doc
-    }))
+    doc
 }
 
-fn convert_container<'src>(
+fn convert_list_like<'src>(
     arena: &'src Arena<'src>,
     elem: &'src SyntaxElement<'src>,
     indent: isize,
@@ -101,29 +134,40 @@ fn convert_container<'src>(
         panic!("Container is missing an opening or closing delimiter.");
     };
 
+    let mut iter = exprs.iter().cloned().peekable();
     let mut doc = open.to_doc(arena);
-    for trivia in open.trivia().1 {
-        if trivia.kind == SyntaxKind::Comment {
+
+    let trailing_trivia = collect_while(&mut iter, |e| is_trailing_trivia(e.kind()));
+    for trivia in trailing_trivia {
+        if *trivia.kind() == SyntaxKind::Comment {
             doc = doc
                 .append(arena.space())
-                .append(trivia.text.trim_end())
+                .append(trivia.text().trim_end())
                 .append(arena.hardline());
         }
     }
 
-    doc = doc.append(arena.concat(exprs.iter().enumerate().map(|(i, expr)| {
-        let (leading_trivia, trailing_trivia) = expr.trivia();
+    // TODO: Avoid mutating state?
+    let mut first_expr = true;
+    let mut last_expr_has_trailing_comment = false;
 
-        let first_expr = i == 0;
+    let leading_trivia = loop {
+        let leading_trivia = collect_while(&mut iter, |e| is_leading_trivia(e.kind()));
+
+        let Some(expr) = iter.next() else {
+            break leading_trivia;
+        };
+
+        let trailing_trivia = collect_while(&mut iter, |e| is_trailing_trivia(e.kind()));
 
         let add_linebreak = !keep_original_linebreaks
             || leading_trivia
                 .first()
-                .map(|t| t.kind == SyntaxKind::Newline)
+                .map(|t| *t.kind() == SyntaxKind::Newline)
                 .unwrap_or(false);
 
         // Handle expr spacing
-        let mut doc = if first_expr {
+        let mut expr_doc = if first_expr {
             arena.nil()
         } else if add_linebreak {
             arena.line()
@@ -131,51 +175,49 @@ fn convert_container<'src>(
             arena.space()
         };
 
-        doc = doc.append(convert_leading_trivia(
+        expr_doc = expr_doc.append(convert_leading_trivia(
             arena,
             leading_trivia,
             !first_expr,
             true,
         ));
-        doc = doc.append(expr.to_doc(arena));
+        expr_doc = expr_doc.append(expr.to_doc(arena));
 
+        last_expr_has_trailing_comment = false;
         for trivia in trailing_trivia {
-            if trivia.kind == SyntaxKind::Comment {
-                doc = doc
+            if *trivia.kind() == SyntaxKind::Comment {
+                // TODO: This should add a hardline
+                expr_doc = expr_doc
                     .append(arena.space())
-                    .append(trivia.text.trim_end())
+                    .append(trivia.text().trim_end())
                     .append(arena.break_group());
+
+                last_expr_has_trailing_comment = true;
             }
         }
 
-        doc
-    })));
+        doc = doc.append(expr_doc);
+        first_expr = false;
+    };
 
-    let last_expr_has_trailing_comment = exprs
-        .last()
-        .map(|n| n.trivia().1.iter().any(|t| t.kind == SyntaxKind::Comment))
-        .unwrap_or(false);
-
-    let closing_has_leading_comment = close
-        .trivia()
-        .0
+    let closing_has_leading_comment = leading_trivia
         .iter()
-        .any(|t| t.kind == SyntaxKind::Comment);
+        .any(|t| *t.kind() == SyntaxKind::Comment);
 
     if last_expr_has_trailing_comment || closing_has_leading_comment {
-        doc = doc.append(arena.line());
+        doc = doc.append(arena.hardline());
     }
 
     doc = doc.append(convert_leading_trivia(
         arena,
-        close.trivia().0,
-        !exprs.is_empty(),
+        leading_trivia,
+        !exprs.iter().all(|e| e.kind().is_trivia()),
         false,
     ));
 
     doc = doc.append(close.to_doc(arena)).hang(indent);
 
-    // Make sure line breaks are kept even when container inside a grouped container
+    // Make sure line breaks are kept even when inside a grouped container
     if keep_original_linebreaks {
         doc = doc.append(arena.break_group());
     }
@@ -185,7 +227,7 @@ fn convert_container<'src>(
 
 fn convert_leading_trivia<'src>(
     arena: &'src Arena<'src>,
-    leading_trivia: &'src Vec<TriviaPiece<'src>>,
+    leading_trivia: Vec<&'src SyntaxElement<'src>>,
     allow_leading_newline: bool,
     allow_trailing_newline: bool,
 ) -> ArenaDoc<'src> {
@@ -194,7 +236,7 @@ fn convert_leading_trivia<'src>(
     let mut doc = arena.nil();
 
     for trivia in leading_trivia {
-        match trivia.kind {
+        match trivia.kind() {
             SyntaxKind::Newline if track_newlines => {
                 consecutive_newlines += 1;
             }
@@ -203,7 +245,9 @@ fn convert_leading_trivia<'src>(
                     doc = doc.append(arena.hardline());
                 }
 
-                doc = doc.append(trivia.text.trim_end()).append(arena.hardline());
+                doc = doc
+                    .append(trivia.text().trim_end())
+                    .append(arena.hardline());
                 track_newlines = true;
                 consecutive_newlines = 0;
             }

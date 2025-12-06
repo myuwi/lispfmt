@@ -55,6 +55,10 @@ pub enum SyntaxKind {
 }
 
 impl SyntaxKind {
+    pub fn is_trivia(&self) -> bool {
+        matches!(self, Self::Newline | Self::Space | Self::Comment)
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             SyntaxKind::LParen => "opening parenthesis",

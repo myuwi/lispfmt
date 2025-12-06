@@ -19,31 +19,7 @@ impl std::fmt::Debug for SyntaxElement<'_> {
                     node.kind,
                     node.span,
                     node.text.escape_debug()
-                )?;
-                if !node.leading_trivia.is_empty() {
-                    write!(
-                        f,
-                        ", leading trivia: \"{}\"",
-                        node.leading_trivia
-                            .iter()
-                            .map(|t| t.text)
-                            .collect::<String>()
-                            .escape_debug()
-                    )?;
-                };
-                if !node.trailing_trivia.is_empty() {
-                    write!(
-                        f,
-                        ", trailing trivia: \"{}\"",
-                        node.trailing_trivia
-                            .iter()
-                            .map(|t| t.text)
-                            .collect::<String>()
-                            .escape_debug()
-                    )?;
-                };
-
-                Ok(())
+                )
             }
             SyntaxElement::Node(node) => {
                 writeln!(f, "{:?}@{:?}", node.kind, node.span)?;
@@ -115,38 +91,6 @@ impl SyntaxElement<'_> {
             SyntaxElement::Node(node) => node.span,
         }
     }
-
-    pub fn trivia(&self) -> (&Vec<TriviaPiece<'_>>, &Vec<TriviaPiece<'_>>) {
-        match self {
-            SyntaxElement::Token(t) => (&t.leading_trivia, &t.trailing_trivia),
-            SyntaxElement::Node(node) => match &node.children[..] {
-                [first, .., last] => {
-                    let leading_trivia = first.trivia().0;
-                    let trailing_trivia = last.trivia().1;
-                    (leading_trivia, trailing_trivia)
-                }
-                [child] => child.trivia(),
-                [] => {
-                    static EMPTY: Vec<TriviaPiece> = vec![];
-                    (&EMPTY, &EMPTY)
-                }
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct TriviaPiece<'src> {
-    pub kind: SyntaxKind,
-    #[allow(dead_code)]
-    pub span: Span,
-    pub text: &'src str,
-}
-
-impl<'src> TriviaPiece<'src> {
-    pub fn new(kind: SyntaxKind, text: &'src str, span: Span) -> Self {
-        Self { kind, span, text }
-    }
 }
 
 #[derive(Debug)]
@@ -154,25 +98,11 @@ pub struct Token<'src> {
     pub kind: SyntaxKind,
     pub span: Span,
     pub text: &'src str,
-    pub leading_trivia: Vec<TriviaPiece<'src>>,
-    pub trailing_trivia: Vec<TriviaPiece<'src>>,
 }
 
 impl<'src> Token<'src> {
-    pub fn new(
-        kind: SyntaxKind,
-        text: &'src str,
-        span: Span,
-        leading_trivia: Vec<TriviaPiece<'src>>,
-        trailing_trivia: Vec<TriviaPiece<'src>>,
-    ) -> Self {
-        Self {
-            kind,
-            span,
-            text,
-            leading_trivia,
-            trailing_trivia,
-        }
+    pub fn new(kind: SyntaxKind, text: &'src str, span: Span) -> Self {
+        Self { kind, span, text }
     }
 }
 
