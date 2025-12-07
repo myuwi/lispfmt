@@ -72,14 +72,9 @@ fn is_trailing_trivia(kind: &SyntaxKind) -> bool {
     matches!(kind, SyntaxKind::Space | SyntaxKind::Comment)
 }
 
-fn check_has_ignore_comment<'a, I>(trivia: &mut I) -> bool
-where
-    I: Iterator<Item = &'a SyntaxElement<'a>>,
-{
-    trivia.any(|t| {
-        t.kind() == &SyntaxKind::Comment
-            && t.text().trim_start_matches(";").trim() == "lispfmt-ignore"
-    })
+fn is_ignore_comment<'a>(trivia: &'a SyntaxElement<'a>) -> bool {
+    trivia.kind() == &SyntaxKind::Comment
+        && trivia.text().trim_start_matches(";").trim() == "lispfmt-ignore"
 }
 
 fn convert_root<'src>(arena: &'src Arena<'src>, root: &'src SyntaxElement<'src>) -> ArenaDoc<'src> {
@@ -93,9 +88,11 @@ fn convert_root<'src>(arena: &'src Arena<'src>, root: &'src SyntaxElement<'src>)
         let expr = iter.next();
         let trailing_trivia = iter.collect_while(|e| is_trailing_trivia(e.kind()));
 
-        let ignored = check_has_ignore_comment(
-            &mut leading_trivia.iter().chain(trailing_trivia.iter()).cloned(),
-        );
+        let ignored = leading_trivia
+            .iter()
+            .chain(trailing_trivia.iter())
+            .cloned()
+            .any(|t| is_ignore_comment(t));
 
         doc = doc.append(convert_leading_trivia(
             arena,
@@ -138,19 +135,24 @@ fn convert_list_like<'src>(
 
     let mut iter = exprs.iter().cloned().peekable();
     let mut doc = open.to_doc(arena);
+    let mut has_leading_ignore_comment = false;
 
-    let trailing_trivia = iter.collect_while(|e| is_trailing_trivia(e.kind()));
-    for trivia in trailing_trivia {
+    // Skip trivia until the first comment
+    while let Some(trivia) = iter.next_if(|t| t.kind().is_trivia()) {
         if *trivia.kind() == SyntaxKind::Comment {
             doc = doc
-                .append(arena.space())
                 .append(trivia.text().trim_end())
                 .append(arena.hardline());
+            has_leading_ignore_comment = is_ignore_comment(trivia);
+            break;
         }
     }
 
+    let allow_leading_empty_line_after_first_newline = indent <= 1;
+
     // TODO: Avoid mutating state?
     let mut first_expr = true;
+    let mut first_newline_found = false;
     let mut last_expr_has_trailing_comment = false;
 
     let leading_trivia = loop {
@@ -163,11 +165,13 @@ fn convert_list_like<'src>(
 
         let trailing_trivia = iter.collect_while(|e| is_trailing_trivia(e.kind()));
 
+        let has_leading_newline = leading_trivia
+            .first()
+            .map(|t| *t.kind() == SyntaxKind::Newline)
+            .unwrap_or(false);
+
         let add_linebreak = if keep_original_linebreaks {
-            leading_trivia
-                .first()
-                .map(|t| *t.kind() == SyntaxKind::Newline)
-                .unwrap_or(false)
+            has_leading_newline
         } else {
             true
         };
@@ -181,16 +185,24 @@ fn convert_list_like<'src>(
             arena.space()
         };
 
+        let allow_leading_empty_newline =
+            !(first_expr || !allow_leading_empty_line_after_first_newline && !first_newline_found);
+
         expr_doc = expr_doc.append(convert_leading_trivia(
             arena,
             &leading_trivia,
-            !first_expr,
+            allow_leading_empty_newline,
             true,
         ));
 
-        let ignored = check_has_ignore_comment(
-            &mut leading_trivia.iter().chain(trailing_trivia.iter()).cloned(),
-        );
+        first_newline_found = first_newline_found || has_leading_newline;
+
+        let ignored = first_expr && has_leading_ignore_comment
+            || leading_trivia
+                .iter()
+                .chain(trailing_trivia.iter())
+                .cloned()
+                .any(|t| is_ignore_comment(t));
 
         // TODO: Break group when ignored is multiline
         if ignored {
